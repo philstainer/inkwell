@@ -44,11 +44,13 @@ function App() {
     const imageAspectRatio = await getImageAspectRatio(signature.image)
     const pageAspectRatio = target?.pageAspectRatio ?? 612 / 792
     const height = signatureHeightRatio(width, pageAspectRatio, imageAspectRatio)
+    const placementId = crypto.randomUUID()
     changePlacements([...placements, {
-      id: crypto.randomUUID(), signatureId, pageNumber: target?.pageNumber ?? 1,
+      id: placementId, signatureId, pageNumber: target?.pageNumber ?? 1,
       x: Math.max(0, Math.min(target?.x ?? .36, 1 - width)),
       y: Math.max(0, Math.min(target?.y ?? .42, 1 - height)), width, height,
     }])
+    setSelectedId(placementId)
   }
   const dropSignatureFromTouch = (signatureId: string, clientX: number, clientY: number) => {
     const page = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.pdf-page')

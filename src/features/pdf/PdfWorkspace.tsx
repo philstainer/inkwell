@@ -66,7 +66,9 @@ export function PdfWorkspace(props: Props) {
     const width = .28
     const imageAspectRatio = await getImageAspectRatio(signature.image)
     const height = signatureHeightRatio(width, pageAspectRatio, imageAspectRatio)
-    onChange([...placements, { id: crypto.randomUUID(), signatureId, pageNumber, x: Math.max(0, Math.min(x, 1 - width)), y: Math.max(0, Math.min(y, 1 - height)), width, height }])
+    const placementId = crypto.randomUUID()
+    onChange([...placements, { id: placementId, signatureId, pageNumber, x: Math.max(0, Math.min(x, 1 - width)), y: Math.max(0, Math.min(y, 1 - height)), width, height }])
+    onSelect(placementId)
   }
 
   if (!pdf || !document) return (
@@ -198,8 +200,11 @@ function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatu
         onDragLeave={(event) => event.currentTarget.classList.remove('drag-active')}
         onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drag-active'); const id = event.dataTransfer.getData('application/signature-id'); const rect = event.currentTarget.getBoundingClientRect(); if (id) onDropSignature(id, size.width / size.height, (event.clientX - rect.left) / rect.width - .14, (event.clientY - rect.top) / rect.height - .05) }}>
         <div ref={canvasHost} className="pdf-canvas-layer" />
-        {placements.map((item) => <Rnd key={item.id} bounds="parent" lockAspectRatio={imageAspects.get(item.signatureId) ?? true} size={{ width: item.width * size.width, height: item.height * size.height }} position={{ x: item.x * size.width, y: item.y * size.height }}
+        {placements.map((item) => <Rnd key={item.id} bounds="parent" lockAspectRatio={imageAspects.get(item.signatureId) ?? true} cancel=".placement-actions" size={{ width: item.width * size.width, height: item.height * size.height }} position={{ x: item.x * size.width, y: item.y * size.height }}
+          enableResizing={selectedId === item.id ? { bottomRight: true } : false}
+          resizeHandleComponent={selectedId === item.id ? { bottomRight: <span className="signature-resize-handle" aria-hidden="true" /> } : undefined}
           onClick={(event: React.MouseEvent) => { event.stopPropagation(); onSelect(item.id) }} className={`placed-signature ${selectedId === item.id ? 'selected' : ''}`}
+          onDragStart={() => onSelect(item.id)} onResizeStart={() => onSelect(item.id)}
           onDragStop={(_, data) => update(item.id, { x: data.x / size.width, y: data.y / size.height })}
           onResizeStop={(_, __, ref, ___, position) => update(item.id, { x: position.x / size.width, y: position.y / size.height, width: ref.offsetWidth / size.width, height: ref.offsetHeight / size.height })}>
           <img src={urls.get(item.signatureId)} alt="Placed signature" draggable={false} />
