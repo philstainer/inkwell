@@ -1,34 +1,28 @@
-# React + TypeScript + Vite
+# Inkwell
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Inkwell is a private, browser-based PDF signer. Create reusable handwritten signatures, place them anywhere in a PDF, and download the signed document without uploading files to a server.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Draw and save multiple signatures locally
+- Drag, resize, duplicate, and reposition signatures
+- Render and sign multi-page PDFs
+- Preserve PDF quality when exporting
+- Restore local drafts between sessions
+- Light and dark themes
+- Installable PWA with offline support
 
-## React Compiler
+All documents, signatures, and drafts remain on your device using IndexedDB.
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+## Development
 
-Note: This will impact Vite dev & build performances.
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+pnpm install
+pnpm dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Create a production build with `pnpm build` and check the code with `pnpm lint`.
+
+## Built with
+
+React, TypeScript, Vite, PDF.js, pdf-lib, react-signature-canvas, react-rnd, IndexedDB, Tailwind CSS, and Vite PWA.
