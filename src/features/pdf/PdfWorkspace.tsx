@@ -90,7 +90,10 @@ export function PdfWorkspace(props: Props) {
   )
 
   return (
-    <main ref={workspaceRef} className="workspace" onClick={() => onSelect(null)}>
+    <main ref={workspaceRef} className="workspace" onPointerDown={(event) => {
+      if ((event.target as HTMLElement).closest('.placed-signature, .placement-actions')) return
+      onSelect(null)
+    }}>
       <div className="pages">
         {Array.from({ length: document.numPages }, (_, index) => (
           <PdfPage key={index + 1} document={document} pageNumber={index + 1} zoom={zoom} fitWidth={fitWidth} availableWidth={workspaceWidth || window.innerWidth} signatures={signatures}
@@ -203,7 +206,11 @@ function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatu
         {placements.map((item) => <Rnd key={item.id} bounds="parent" lockAspectRatio={imageAspects.get(item.signatureId) ?? true} cancel=".placement-actions" size={{ width: item.width * size.width, height: item.height * size.height }} position={{ x: item.x * size.width, y: item.y * size.height }}
           enableResizing={selectedId === item.id ? { bottomRight: true } : false}
           resizeHandleComponent={selectedId === item.id ? { bottomRight: <span className="signature-resize-handle" aria-hidden="true" /> } : undefined}
-          onClick={(event: React.MouseEvent) => { event.stopPropagation(); onSelect(item.id) }} className={`placed-signature ${selectedId === item.id ? 'selected' : ''}`}
+          role="button" tabIndex={0} aria-label="Signature placement. Drag to move or use the corner handle to resize."
+          onPointerDown={(event: React.PointerEvent) => { event.stopPropagation(); onSelect(item.id) }}
+          onClick={(event: React.MouseEvent) => { event.stopPropagation(); onSelect(item.id) }}
+          onKeyDown={(event: React.KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(item.id) } }}
+          className={`placed-signature ${selectedId === item.id ? 'selected' : ''}`}
           onDragStart={() => onSelect(item.id)} onResizeStart={() => onSelect(item.id)}
           onDragStop={(_, data) => update(item.id, { x: data.x / size.width, y: data.y / size.height })}
           onResizeStop={(_, __, ref, ___, position) => update(item.id, { x: position.x / size.width, y: position.y / size.height, width: ref.offsetWidth / size.width, height: ref.offsetHeight / size.height })}>
