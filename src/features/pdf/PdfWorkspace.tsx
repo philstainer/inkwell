@@ -148,7 +148,7 @@ function PdfPage({ document, pageNumber, zoom, signatures, placements, allPlacem
   return (
     <section className="pdf-page-wrap">
       <div className="page-label">Page {pageNumber}</div>
-      <div ref={pageRef} className="pdf-page" style={size}
+      <div ref={pageRef} className="pdf-page" data-page-number={pageNumber} style={size}
         onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drag-active') }}
         onDragLeave={(event) => event.currentTarget.classList.remove('drag-active')}
         onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drag-active'); const id = event.dataTransfer.getData('application/signature-id'); const rect = event.currentTarget.getBoundingClientRect(); if (id) onDropSignature(id, size.width / size.height, (event.clientX - rect.left) / rect.width - .14, (event.clientY - rect.top) / rect.height - .05) }}>

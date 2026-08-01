@@ -9,6 +9,10 @@ import type { Placement, Signature } from './types'
 import { getImageAspectRatio, signatureHeightRatio } from './features/signatures/imageDimensions'
 import './App.css'
 
+const fitWidthZoom = () => window.innerWidth <= 700
+  ? Math.max(.35, Math.min(.82, (window.innerWidth - 32) / (612 * 1.25)))
+  : .82
+
 function App() {
   const picker = useRef<HTMLInputElement>(null)
   const [signatures, setSignatures] = useState<Signature[]>([])
@@ -18,7 +22,7 @@ function App() {
   const [history, setHistory] = useState<Placement[][]>([])
   const [future, setFuture] = useState<Placement[][]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [zoom, setZoom] = useState(.82)
+  const [zoom, setZoom] = useState(fitWidthZoom)
   const [dialog, setDialog] = useState(false)
   const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark')
   const [restored, setRestored] = useState(false)
@@ -31,14 +35,32 @@ function App() {
   const openFile = (file?: File) => { if (!file) return; setPdf(file); setFileName(file.name); setPlacements([]); setHistory([]); setFuture([]); setRestored(false) }
   const addSignature = async (signature: Signature) => { await saveSignature(signature); setSignatures((items) => [signature, ...items]) }
   const deleteSignature = async (id: string) => { await removeSignature(id); setSignatures((items) => items.filter((item) => item.id !== id)); changePlacements(placements.filter((item) => item.signatureId !== id)) }
-  const placeSignature = async (signatureId: string) => {
+  const placeSignature = async (signatureId: string, target?: { pageNumber: number; pageAspectRatio: number; x: number; y: number }) => {
     if (!pdf) return
     const signature = signatures.find((item) => item.id === signatureId)
     if (!signature) return
     const width = .28
     const imageAspectRatio = await getImageAspectRatio(signature.image)
-    const height = signatureHeightRatio(width, 612 / 792, imageAspectRatio)
-    changePlacements([...placements, { id: crypto.randomUUID(), signatureId, pageNumber: 1, x: .36, y: Math.min(.42, 1 - height), width, height }])
+    const pageAspectRatio = target?.pageAspectRatio ?? 612 / 792
+    const height = signatureHeightRatio(width, pageAspectRatio, imageAspectRatio)
+    changePlacements([...placements, {
+      id: crypto.randomUUID(), signatureId, pageNumber: target?.pageNumber ?? 1,
+      x: Math.max(0, Math.min(target?.x ?? .36, 1 - width)),
+      y: Math.max(0, Math.min(target?.y ?? .42, 1 - height)), width, height,
+    }])
+  }
+  const dropSignatureFromTouch = (signatureId: string, clientX: number, clientY: number) => {
+    const page = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.pdf-page')
+    if (!page) return false
+    const rect = page.getBoundingClientRect()
+    const pageNumber = Number(page.dataset.pageNumber)
+    void placeSignature(signatureId, {
+      pageNumber,
+      pageAspectRatio: rect.width / rect.height,
+      x: (clientX - rect.left) / rect.width - .14,
+      y: (clientY - rect.top) / rect.height - .05,
+    })
+    return true
   }
   const download = async () => { if (!pdf) return; const result = await exportPdf(pdf, placements, signatures); const url = URL.createObjectURL(result); const anchor = document.createElement('a'); anchor.href = url; anchor.download = fileName.replace(/\.pdf$/i, '') + '-signed.pdf'; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000) }
   const undo = () => { const previous = history.at(-1); if (!previous) return; setFuture((items) => [placements, ...items]); setPlacements(previous); setHistory((items) => items.slice(0, -1)) }
@@ -47,8 +69,8 @@ function App() {
   return <div className="app-shell">
     <header className="topbar"><div className="brand"><span className="brand-mark"><FileText size={18} /><i /></span><span>Inkwell</span></div><div className="document-title">{fileName || 'Untitled document'}{pdf && <span className="saved"><Check size={12} /> Saved locally</span>}</div><div className="toolbar-actions"><button className="icon-button theme-button" onClick={() => setDark(!dark)} aria-label="Toggle theme">{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="button ghost" onClick={() => picker.current?.click()}><FolderOpen size={16} /> Open PDF</button><button className="button primary" disabled={!pdf || placements.length === 0} onClick={download}><Download size={16} /> Save PDF</button></div></header>
     <div className="privacy-banner"><ShieldCheck size={14} /><span>Your documents never leave your device. Everything is processed locally in your browser.</span></div>
-    <div className="editor-toolbar"><div className="tool-group"><button className="icon-button" onClick={undo} disabled={!history.length} aria-label="Undo"><Undo2 size={16} /></button><button className="icon-button" onClick={redo} disabled={!future.length} aria-label="Redo"><Redo2 size={16} /></button></div><div className="tool-group zoom-group"><button className="icon-button" onClick={() => setZoom((v) => Math.max(.35, v - .1))} aria-label="Zoom out"><Minus size={15} /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" onClick={() => setZoom((v) => Math.min(2, v + .1))} aria-label="Zoom in"><Plus size={15} /></button></div><button className="fit-button" onClick={() => setZoom(.82)}>Fit width <ChevronDown size={13} /></button></div>
-    <div className="editor-body"><SignatureLibrary signatures={signatures} onAdd={() => setDialog(true)} onDelete={deleteSignature} onPlace={placeSignature} /><PdfWorkspace pdf={pdf} zoom={zoom} signatures={signatures} placements={placements} selectedId={selectedId} onSelect={setSelectedId} onChange={changePlacements} onOpen={() => picker.current?.click()} onFileDrop={openFile} /></div>
+    <div className="editor-toolbar"><div className="tool-group"><button className="icon-button" onClick={undo} disabled={!history.length} aria-label="Undo"><Undo2 size={16} /></button><button className="icon-button" onClick={redo} disabled={!future.length} aria-label="Redo"><Redo2 size={16} /></button></div><div className="tool-group zoom-group"><button className="icon-button" onClick={() => setZoom((v) => Math.max(.35, v - .1))} aria-label="Zoom out"><Minus size={15} /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" onClick={() => setZoom((v) => Math.min(2, v + .1))} aria-label="Zoom in"><Plus size={15} /></button></div><button className="fit-button" onClick={() => setZoom(fitWidthZoom())}>Fit width <ChevronDown size={13} /></button></div>
+    <div className="editor-body"><SignatureLibrary signatures={signatures} onAdd={() => setDialog(true)} onDelete={deleteSignature} onPlace={placeSignature} onTouchDrop={dropSignatureFromTouch} /><PdfWorkspace pdf={pdf} zoom={zoom} signatures={signatures} placements={placements} selectedId={selectedId} onSelect={setSelectedId} onChange={changePlacements} onOpen={() => picker.current?.click()} onFileDrop={openFile} /></div>
     {restored && <div className="toast"><Check size={15} /> Restored your last draft</div>}<input ref={picker} className="visually-hidden" type="file" accept="application/pdf" onChange={(e) => openFile(e.target.files?.[0])} /><SignatureDialog open={dialog} onOpenChange={setDialog} onSave={addSignature} />
   </div>
 }
