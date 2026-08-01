@@ -10,6 +10,13 @@ export default defineConfig({
     react(),
     tailwindcss(),
     babel({ presets: [reactCompilerPreset()] }),
-    VitePWA({ registerType: 'autoUpdate', includeAssets: ['favicon.svg'], manifest: { name: 'Inkwell — Private PDF Signer', short_name: 'Inkwell', description: 'Sign PDF documents privately in your browser.', theme_color: '#1f5b47', background_color: '#f2f4f3', display: 'standalone', icons: [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }] } })
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.svg'],
+      workbox: {
+        globPatterns: ['**/*.{js,mjs,wasm,css,html}'],
+      },
+      manifest: { name: 'Inkwell — Private PDF Signer', short_name: 'Inkwell', description: 'Sign PDF documents privately in your browser.', theme_color: '#1f5b47', background_color: '#f2f4f3', display: 'standalone', icons: [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }] },
+    })
   ],
 })
