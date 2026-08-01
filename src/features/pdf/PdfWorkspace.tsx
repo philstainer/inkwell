@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import * as pdfjs from 'pdfjs-dist'
-import type { PDFDocumentProxy } from 'pdfjs-dist'
+import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import { Copy, FileUp, Trash2 } from 'lucide-react'
 import type { Placement, Signature } from '../../types'
 import { getImageAspectRatio, signatureHeightRatio } from '../signatures/imageDimensions'
@@ -11,6 +11,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.m
 type Props = {
   pdf: Blob | null
   zoom: number
+  fitWidth: boolean
   signatures: Signature[]
   placements: Placement[]
   selectedId: string | null
@@ -21,20 +22,43 @@ type Props = {
 }
 
 export function PdfWorkspace(props: Props) {
-  const { pdf, zoom, signatures, placements, selectedId, onSelect, onChange, onOpen, onFileDrop } = props
+  const { pdf, zoom, fitWidth, signatures, placements, selectedId, onSelect, onChange, onOpen, onFileDrop } = props
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  const [workspaceWidth, setWorkspaceWidth] = useState(0)
+  const workspaceRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
-    if (!pdf) { setDocument(null); return }
+    setDocument(null)
+    setLoadError(false)
+    if (!pdf) return
     let active = true
     let task: ReturnType<typeof pdfjs.getDocument> | undefined
     void pdf.arrayBuffer().then((data) => {
       if (!active) return
       task = pdfjs.getDocument({ data })
-      void task.promise.then((next) => active && setDocument(next))
-    })
-    return () => { active = false; void task?.destroy() }
+      void task.promise.then((next) => { if (active) setDocument(next) }).catch(() => { if (active) setLoadError(true) })
+    }).catch(() => { if (active) setLoadError(true) })
+    return () => { active = false; void task?.destroy().catch(() => undefined) }
   }, [pdf])
+
+  useEffect(() => {
+    const node = workspaceRef.current
+    if (!node) return
+    const updateWidth = () => setWorkspaceWidth(node.clientWidth)
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [document, pdf])
+
+  if (pdf && !document) return (
+    <main ref={workspaceRef} className="workspace loading-workspace">
+      <div className="document-loader" role="status">
+        {loadError ? <><strong>We couldn’t open this PDF</strong><span>Try opening the file again.</span><button className="button primary" onClick={onOpen}>Choose PDF</button></> : <><i /><strong>Preparing your document…</strong><span>Everything stays on this device.</span></>}
+      </div>
+    </main>
+  )
 
   const addToPage = async (signatureId: string, pageNumber: number, pageAspectRatio: number, x = .36, y = .42) => {
     const signature = signatures.find((item) => item.id === signatureId)
@@ -46,7 +70,7 @@ export function PdfWorkspace(props: Props) {
   }
 
   if (!pdf || !document) return (
-    <main className="workspace empty-workspace">
+    <main ref={workspaceRef} className="workspace empty-workspace">
       <button className="drop-zone" onClick={onOpen} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file?.type === 'application/pdf') onFileDrop(file) }}>
         <div className="upload-illustration"><FileUp size={29} /></div>
         <h2>Open a PDF to get started</h2>
@@ -64,10 +88,10 @@ export function PdfWorkspace(props: Props) {
   )
 
   return (
-    <main className="workspace" onClick={() => onSelect(null)}>
+    <main ref={workspaceRef} className="workspace" onClick={() => onSelect(null)}>
       <div className="pages">
         {Array.from({ length: document.numPages }, (_, index) => (
-          <PdfPage key={index + 1} document={document} pageNumber={index + 1} zoom={zoom} signatures={signatures}
+          <PdfPage key={index + 1} document={document} pageNumber={index + 1} zoom={zoom} fitWidth={fitWidth} availableWidth={workspaceWidth || window.innerWidth} signatures={signatures}
             placements={placements.filter((item) => item.pageNumber === index + 1)} selectedId={selectedId} onSelect={onSelect} onChange={onChange}
             allPlacements={placements} onDropSignature={(id, pageAspectRatio, x, y) => void addToPage(id, index + 1, pageAspectRatio, x, y)} />
         ))}
@@ -77,14 +101,15 @@ export function PdfWorkspace(props: Props) {
 }
 
 type PageProps = {
-  document: PDFDocumentProxy; pageNumber: number; zoom: number; signatures: Signature[]; placements: Placement[]
+  document: PDFDocumentProxy; pageNumber: number; zoom: number; fitWidth: boolean; availableWidth: number; signatures: Signature[]; placements: Placement[]
   allPlacements: Placement[]; selectedId: string | null; onSelect: (id: string | null) => void; onChange: (items: Placement[]) => void
   onDropSignature: (id: string, pageAspectRatio: number, x: number, y: number) => void
 }
 
-function PdfPage({ document, pageNumber, zoom, signatures, placements, allPlacements, selectedId, onSelect, onChange, onDropSignature }: PageProps) {
-  const canvas = useRef<HTMLCanvasElement>(null)
+function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatures, placements, allPlacements, selectedId, onSelect, onChange, onDropSignature }: PageProps) {
+  const canvasHost = useRef<HTMLDivElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
+  const renderTaskRef = useRef<RenderTask | null>(null)
   const [size, setSize] = useState({ width: 612, height: 792 })
   const [visible, setVisible] = useState(pageNumber <= 2)
   const [imageAspects, setImageAspects] = useState<Map<string, number>>(new Map())
@@ -110,21 +135,41 @@ function PdfPage({ document, pageNumber, zoom, signatures, placements, allPlacem
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
-    if (!visible) return
-    let renderTask: { cancel: () => void } | undefined
-    void document.getPage(pageNumber).then((page) => {
-      const viewport = page.getViewport({ scale: zoom * 1.25 })
+    let active = true
+    let ownedTask: RenderTask | null = null
+    void (async () => {
+      const previousTask = renderTaskRef.current
+      if (previousTask) {
+        previousTask.cancel()
+        try { await previousTask.promise } catch { /* A cancelled render is expected. */ }
+      }
+      if (!active) return
+      const page = await document.getPage(pageNumber)
+      if (!active) return
+      const baseViewport = page.getViewport({ scale: 1 })
+      const pageGutter = availableWidth <= 700 ? 24 : 64
+      const fittedScale = Math.max(.1, (availableWidth - pageGutter) / baseViewport.width)
+      const scale = fitWidth ? Math.min(zoom * 1.25, fittedScale) : zoom * 1.25
+      const viewport = page.getViewport({ scale })
       setSize({ width: viewport.width, height: viewport.height })
-      const context = canvas.current?.getContext('2d')
-      if (!canvas.current || !context) return
-      canvas.current.width = viewport.width * devicePixelRatio
-      canvas.current.height = viewport.height * devicePixelRatio
-      canvas.current.style.width = `${viewport.width}px`
-      canvas.current.style.height = `${viewport.height}px`
-      renderTask = page.render({ canvas: canvas.current, canvasContext: context, viewport, transform: [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0] })
-    })
-    return () => renderTask?.cancel()
-  }, [document, pageNumber, zoom, visible])
+      if (!visible) return
+      const host = canvasHost.current
+      if (!active || !host) return
+      const nextCanvas = globalThis.document.createElement('canvas')
+      const context = nextCanvas.getContext('2d')
+      if (!context) return
+      nextCanvas.width = Math.floor(viewport.width * devicePixelRatio)
+      nextCanvas.height = Math.floor(viewport.height * devicePixelRatio)
+      nextCanvas.style.width = `${viewport.width}px`
+      nextCanvas.style.height = `${viewport.height}px`
+      host.replaceChildren(nextCanvas)
+      ownedTask = page.render({ canvas: nextCanvas, canvasContext: context, viewport, transform: [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0] })
+      renderTaskRef.current = ownedTask
+      try { await ownedTask.promise } catch { /* Superseded renders are deliberately cancelled. */ }
+      if (renderTaskRef.current === ownedTask) renderTaskRef.current = null
+    })()
+    return () => { active = false; ownedTask?.cancel() }
+  }, [availableWidth, document, fitWidth, pageNumber, zoom, visible])
 
   const update = (id: string, patch: Partial<Placement>) => onChange(allPlacements.map((item) => item.id === id ? { ...item, ...patch } : item))
   const remove = (id: string) => onChange(allPlacements.filter((item) => item.id !== id))
@@ -152,7 +197,7 @@ function PdfPage({ document, pageNumber, zoom, signatures, placements, allPlacem
         onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drag-active') }}
         onDragLeave={(event) => event.currentTarget.classList.remove('drag-active')}
         onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drag-active'); const id = event.dataTransfer.getData('application/signature-id'); const rect = event.currentTarget.getBoundingClientRect(); if (id) onDropSignature(id, size.width / size.height, (event.clientX - rect.left) / rect.width - .14, (event.clientY - rect.top) / rect.height - .05) }}>
-        <canvas ref={canvas} />
+        <div ref={canvasHost} className="pdf-canvas-layer" />
         {placements.map((item) => <Rnd key={item.id} bounds="parent" lockAspectRatio={imageAspects.get(item.signatureId) ?? true} size={{ width: item.width * size.width, height: item.height * size.height }} position={{ x: item.x * size.width, y: item.y * size.height }}
           onClick={(event: React.MouseEvent) => { event.stopPropagation(); onSelect(item.id) }} className={`placed-signature ${selectedId === item.id ? 'selected' : ''}`}
           onDragStop={(_, data) => update(item.id, { x: data.x / size.width, y: data.y / size.height })}
