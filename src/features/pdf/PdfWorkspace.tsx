@@ -4,7 +4,7 @@ import * as pdfjs from 'pdfjs-dist'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import { Copy, FileUp, Trash2 } from 'lucide-react'
 import type { Placement, Signature } from '../../types'
-import { getImageAspectRatio, signatureHeightRatio } from '../signatures/imageDimensions'
+import { getImageAspectRatio, signatureHeightRatio, signatureWidthRatioForZoom } from '../signatures/imageDimensions'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -138,14 +138,16 @@ export function PdfWorkspace(props: Props) {
     </main>
   )
 
-  const addToPage = async (signatureId: string, pageNumber: number, pageAspectRatio: number, x = .36, y = .42) => {
+  const addToPage = async (signatureId: string, pageNumber: number, pageAspectRatio: number, centerX: number, centerY: number) => {
     const signature = signatures.find((item) => item.id === signatureId)
     if (!signature) return
-    const width = .28
+    const width = signatureWidthRatioForZoom(zoom)
     const imageAspectRatio = await getImageAspectRatio(signature.image)
     const height = signatureHeightRatio(width, pageAspectRatio, imageAspectRatio)
     const placementId = crypto.randomUUID()
-    onChange([...placements, { id: placementId, signatureId, pageNumber, x: Math.max(0, Math.min(x, 1 - width)), y: Math.max(0, Math.min(y, 1 - height)), width, height }])
+    const x = Math.max(0, Math.min(centerX - width / 2, 1 - width))
+    const y = Math.max(0, Math.min(centerY - height / 2, 1 - height))
+    onChange([...placements, { id: placementId, signatureId, pageNumber, x, y, width, height }])
     onSelect(placementId)
   }
 
@@ -280,7 +282,7 @@ function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatu
       <div ref={pageRef} className="pdf-page" data-page-number={pageNumber} style={size}
         onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drag-active') }}
         onDragLeave={(event) => event.currentTarget.classList.remove('drag-active')}
-        onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drag-active'); const id = event.dataTransfer.getData('application/signature-id'); const rect = event.currentTarget.getBoundingClientRect(); if (id) onDropSignature(id, size.width / size.height, (event.clientX - rect.left) / rect.width - .14, (event.clientY - rect.top) / rect.height - .05) }}>
+        onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drag-active'); const id = event.dataTransfer.getData('application/signature-id'); const rect = event.currentTarget.getBoundingClientRect(); if (id) onDropSignature(id, size.width / size.height, (event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height) }}>
         <div ref={canvasHost} className="pdf-canvas-layer" />
         {placements.map((item) => <Rnd key={item.id} bounds="parent" lockAspectRatio={imageAspects.get(item.signatureId) ?? true} cancel=".placement-actions" size={{ width: item.width * size.width, height: item.height * size.height }} position={{ x: item.x * size.width, y: item.y * size.height }}
           enableResizing={selectedId === item.id ? { bottomRight: true } : false}

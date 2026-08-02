@@ -12,3 +12,9 @@ export function signatureHeightRatio(
 ) {
   return widthRatio * pageAspectRatio / imageAspectRatio
 }
+
+const defaultSignatureWidthRatio = .28
+
+export function signatureWidthRatioForZoom(zoom: number) {
+  return defaultSignatureWidthRatio / Math.max(1, zoom)
+}

@@ -6,7 +6,7 @@ import { PdfWorkspace } from './features/pdf/PdfWorkspace'
 import { exportPdf } from './features/pdf/exportPdf'
 import { getDraft, getSignatures, removeSignature, saveDraft, saveSignature } from './features/storage/db'
 import type { Placement, Signature } from './types'
-import { getImageAspectRatio, signatureHeightRatio } from './features/signatures/imageDimensions'
+import { getImageAspectRatio, signatureHeightRatio, signatureWidthRatioForZoom } from './features/signatures/imageDimensions'
 import './App.css'
 
 const fitWidthZoom = () => window.innerWidth <= 700
@@ -47,19 +47,19 @@ function App() {
   const openFile = (file?: File) => { if (!file) return; setPdf(file); setFileName(file.name); setPlacements([]); setHistory([]); setFuture([]); setRestored(false) }
   const addSignature = async (signature: Signature) => { await saveSignature(signature); setSignatures((items) => [signature, ...items]) }
   const deleteSignature = async (id: string) => { await removeSignature(id); setSignatures((items) => items.filter((item) => item.id !== id)); changePlacements(placements.filter((item) => item.signatureId !== id)) }
-  const placeSignature = async (signatureId: string, target?: { pageNumber: number; pageAspectRatio: number; x: number; y: number }) => {
+  const placeSignature = async (signatureId: string, target?: { pageNumber: number; pageAspectRatio: number; centerX: number; centerY: number }) => {
     if (!pdf) return
     const signature = signatures.find((item) => item.id === signatureId)
     if (!signature) return
-    const width = .28
+    const width = signatureWidthRatioForZoom(zoom)
     const imageAspectRatio = await getImageAspectRatio(signature.image)
     const pageAspectRatio = target?.pageAspectRatio ?? 612 / 792
     const height = signatureHeightRatio(width, pageAspectRatio, imageAspectRatio)
     const placementId = crypto.randomUUID()
     changePlacements([...placements, {
       id: placementId, signatureId, pageNumber: target?.pageNumber ?? 1,
-      x: Math.max(0, Math.min(target?.x ?? .36, 1 - width)),
-      y: Math.max(0, Math.min(target?.y ?? .42, 1 - height)), width, height,
+      x: Math.max(0, Math.min(target ? target.centerX - width / 2 : .36, 1 - width)),
+      y: Math.max(0, Math.min(target ? target.centerY - height / 2 : .42, 1 - height)), width, height,
     }])
     setSelectedId(placementId)
   }
@@ -71,8 +71,8 @@ function App() {
     void placeSignature(signatureId, {
       pageNumber,
       pageAspectRatio: rect.width / rect.height,
-      x: (clientX - rect.left) / rect.width - .14,
-      y: (clientY - rect.top) / rect.height - .05,
+      centerX: (clientX - rect.left) / rect.width,
+      centerY: (clientY - rect.top) / rect.height,
     })
     return true
   }
