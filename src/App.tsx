@@ -40,10 +40,32 @@ function App() {
   const [fillDialog, setFillDialog] = useState<'text' | 'initials' | null>(null)
   const [fillValue, setFillValue] = useState('')
   const [fillFont, setFillFont] = useState<FillFont>('sans')
+  const [saveState, setSaveState] = useState<'saving' | 'saved' | 'error'>('saved')
 
-  useEffect(() => { void Promise.all([getSignatures(), getDraft()]).then(([saved, draft]) => { setSignatures(saved.sort((a, b) => b.createdAt - a.createdAt)); if (draft) { setPdf(draft.pdf); setFileName(draft.fileName); setPlacements(draft.placements); setRestored(true) } }) }, [])
+  useEffect(() => {
+    void Promise.allSettled([getSignatures(), getDraft()]).then(([savedResult, draftResult]) => {
+      if (savedResult.status === 'fulfilled') setSignatures(savedResult.value.sort((a, b) => b.createdAt - a.createdAt))
+      if (draftResult.status === 'fulfilled' && draftResult.value) {
+        const draft = draftResult.value
+        setPdf(draft.pdf)
+        setFileName(draft.fileName)
+        setPlacements(draft.placements)
+        setRestored(true)
+      }
+      if (savedResult.status === 'rejected' || draftResult.status === 'rejected') setSaveState('error')
+    })
+  }, [])
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('theme', dark ? 'dark' : 'light') }, [dark])
-  useEffect(() => { if (!pdf) return; const timer = window.setTimeout(() => void saveDraft({ id: 'current', fileName, pdf, placements, lastEditedAt: Date.now() }), 500); return () => clearTimeout(timer) }, [pdf, fileName, placements])
+  useEffect(() => {
+    if (!pdf) return
+    setSaveState('saving')
+    const timer = window.setTimeout(() => {
+      void saveDraft({ id: 'current', fileName, pdf, placements, lastEditedAt: Date.now() })
+        .then(() => setSaveState('saved'))
+        .catch(() => setSaveState('error'))
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [pdf, fileName, placements])
   useEffect(() => {
     const outsidePdf = (target: EventTarget | null) => !(target instanceof Element && target.closest('.workspace'))
     const stopUiPinch = (event: TouchEvent) => { if (event.touches.length > 1 && outsidePdf(event.target)) event.preventDefault() }
@@ -57,7 +79,19 @@ function App() {
   }, [])
 
   const changePlacements = useCallback((next: Placement[]) => { setPlacements((current) => { setHistory((items) => [...items.slice(-39), current]); return next }); setFuture([]) }, [])
-  const openFile = (file?: File) => { if (!file) return; setPdf(file); setFileName(file.name); setPlacements([]); setHistory([]); setFuture([]); setRestored(false) }
+  const openFile = (file?: File) => {
+    if (!file) return
+    setPdf(file)
+    setFileName(file.name)
+    setPlacements([])
+    setHistory([])
+    setFuture([])
+    setRestored(false)
+    setSaveState('saving')
+    void saveDraft({ id: 'current', fileName: file.name, pdf: file, placements: [], lastEditedAt: Date.now() })
+      .then(() => setSaveState('saved'))
+      .catch(() => setSaveState('error'))
+  }
   const addSignature = async (signature: Signature) => { await saveSignature(signature); setSignatures((items) => [signature, ...items]) }
   const deleteSignature = async (id: string) => { await removeSignature(id); setSignatures((items) => items.filter((item) => item.id !== id)); changePlacements(placements.filter((item) => !isSignaturePlacement(item) || item.signatureId !== id)) }
   const getCurrentViewTarget = (): PlacementTarget | undefined => {
@@ -160,11 +194,11 @@ function App() {
   }
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span className="brand-mark"><FileText size={18} /><i /></span><span>Inkwell</span></div><div className="document-title">{fileName || 'Untitled document'}{pdf && <span className="saved"><Check size={12} /> Saved locally</span>}</div><div className="toolbar-actions"><button className="icon-button theme-button" onClick={() => setDark(!dark)} aria-label="Toggle theme">{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="button ghost" onClick={() => picker.current?.click()}><FolderOpen size={16} /> Open PDF</button><button className="button primary" disabled={!pdf || placements.length === 0} onClick={download}><Download size={16} /> Save PDF</button></div></header>
+    <header className="topbar"><div className="brand"><span className="brand-mark"><FileText size={18} /><i /></span><span>Inkwell</span></div><div className="document-title">{fileName || 'Untitled document'}{pdf && <span className={`saved ${saveState}`}>{saveState === 'saved' && <Check size={12} />}{saveState === 'saving' ? 'Saving locally…' : saveState === 'error' ? 'Not saved' : 'Saved locally'}</span>}</div><div className="toolbar-actions"><button className="icon-button theme-button" onClick={() => setDark(!dark)} aria-label="Toggle theme">{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="button ghost" onClick={() => picker.current?.click()}><FolderOpen size={16} /> Open PDF</button><button className="button primary" disabled={!pdf || placements.length === 0} onClick={download}><Download size={16} /> Save PDF</button></div></header>
     <div className="privacy-banner"><ShieldCheck size={14} /><span>Your documents never leave your device. Everything is processed locally in your browser.</span></div>
     <div className="editor-toolbar"><div className="mobile-fill-tools"><FillTools compact disabled={!pdf} onAdd={chooseFillTool} /><button className="mobile-new-signature" onClick={() => setDialog(true)} aria-label="New signature" title="New signature"><span className="mobile-new-signature-glyph"><PenLine className="mobile-new-signature-pen" size={16} /><Plus className="mobile-new-signature-plus" size={8} /></span></button></div><FontPicker compact value={activeFillFont} onChange={changeFillFont} /><div className="tool-group"><button className="icon-button" onClick={undo} disabled={!history.length} aria-label="Undo"><Undo2 size={16} /></button><button className="icon-button" onClick={redo} disabled={!future.length} aria-label="Redo"><Redo2 size={16} /></button></div><div className="tool-group zoom-group"><button className="icon-button" onClick={() => { setFitWidth(false); setZoom((v) => Math.max(.35, v - .1)) }} aria-label="Zoom out"><Minus size={15} /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" onClick={() => { setFitWidth(false); setZoom((v) => Math.min(2, v + .1)) }} aria-label="Zoom in"><Plus size={15} /></button></div><button className="fit-button" onClick={() => { setFitWidth(true); setZoom(fitWidthZoom()) }}>Fit width <ChevronDown size={13} /></button></div>
     <div className="editor-body"><SignatureLibrary signatures={signatures} onAdd={() => setDialog(true)} onDelete={deleteSignature} onPlace={placeSignature} onTouchDrop={dropSignatureFromTouch} pdfOpen={Boolean(pdf)} onAddFill={chooseFillTool} /><PdfWorkspace pdf={pdf} zoom={zoom} fitWidth={fitWidth} onZoomChange={pinchZoom} signatures={signatures} placements={placements} selectedId={selectedId} onSelect={setSelectedId} onChange={changePlacements} onOpen={() => picker.current?.click()} onFileDrop={openFile} /></div>
-    {restored && <div className="toast"><Check size={15} /> Restored your last draft</div>}<input ref={picker} className="visually-hidden" type="file" accept="application/pdf" onChange={(e) => openFile(e.target.files?.[0])} /><SignatureDialog open={dialog} onOpenChange={setDialog} onSave={addSignature} />
+    {saveState === 'error' ? <div className="toast error" role="alert">Couldn’t save locally. Check that browser storage is available.</div> : restored && <div className="toast"><Check size={15} /> Restored your last draft</div>}<input ref={picker} className="visually-hidden" type="file" accept="application/pdf" onChange={(e) => openFile(e.target.files?.[0])} /><SignatureDialog open={dialog} onOpenChange={setDialog} onSave={addSignature} />
     {fillDialog && <div className="fill-dialog-backdrop" onMouseDown={() => setFillDialog(null)}><form className="fill-dialog" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); confirmFill() }}>
       <h2>Add {fillDialog === 'initials' ? 'initials' : 'text'}</h2>
       <p>You can move and resize it after placing it.</p>

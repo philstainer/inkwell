@@ -7,31 +7,52 @@ import type { Signature } from '../../types'
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (signature: Signature) => void
+  onSave: (signature: Signature) => Promise<void>
 }
 
 export function SignatureDialog({ open, onOpenChange, onSave }: Props) {
   const pad = useRef<SignatureCanvas>(null)
   const [name, setName] = useState('')
+  const [hasInk, setHasInk] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   useEffect(() => {
-    if (open) setName('')
+    if (open) {
+      setName('')
+      setHasInk(false)
+      setSaving(false)
+      setSaveError('')
+    }
   }, [open])
 
-  const save = () => {
-    if (!pad.current || pad.current.isEmpty()) return
-    const canvas = trimTransparentCanvas(pad.current.getCanvas())
-    canvas.toBlob((image) => {
-      if (!image) return
-      onSave({
+  const clear = () => {
+    pad.current?.clear()
+    setHasInk(false)
+    setSaveError('')
+  }
+
+  const save = async () => {
+    if (!pad.current || pad.current.isEmpty() || saving) return
+    setSaving(true)
+    setSaveError('')
+
+    try {
+      const canvas = trimTransparentCanvas(pad.current.getCanvas())
+      const image = await canvasToBlob(canvas)
+      await onSave({
         id: crypto.randomUUID(),
         name: name.trim() || 'My signature',
         image,
         createdAt: Date.now(),
       })
-      pad.current?.clear()
+      clear()
       onOpenChange(false)
-    }, 'image/png')
+    } catch {
+      setSaveError('We couldn’t save this signature. Please try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -47,22 +68,32 @@ export function SignatureDialog({ open, onOpenChange, onSave }: Props) {
             <Dialog.Close className="icon-button" aria-label="Close"><X size={18} /></Dialog.Close>
           </div>
           <label className="field-label" htmlFor="signature-name">Signature name</label>
-          <input id="signature-name" className="text-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Full signature" autoFocus />
+          <input id="signature-name" className="text-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Full signature" />
           <div className="signature-pad">
-            <SignatureCanvas ref={pad} penColor="#15261f" canvasProps={{ className: 'signature-canvas' }} />
+            <SignatureCanvas ref={pad} penColor="#15261f" clearOnResize={false} onBegin={() => { setHasInk(true); setSaveError('') }} canvasProps={{ className: 'signature-canvas' }} />
             <span className="sign-line">Sign above the line</span>
           </div>
+          {saveError && <p className="signature-save-error" role="alert">{saveError}</p>}
           <div className="dialog-actions">
-            <button className="button ghost" onClick={() => pad.current?.clear()}><Eraser size={16} /> Clear</button>
+            <button className="button ghost" onClick={clear} disabled={saving || !hasInk}><Eraser size={16} /> Clear</button>
             <div className="dialog-actions-right">
-              <Dialog.Close className="button ghost">Cancel</Dialog.Close>
-              <button className="button primary" onClick={save}>Save signature</button>
+              <Dialog.Close className="button ghost" disabled={saving}>Cancel</Dialog.Close>
+              <button className="button primary" onClick={() => void save()} disabled={saving || !hasInk}>{saving ? 'Saving…' : 'Save signature'}</button>
             </div>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
   )
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((image) => {
+      if (image) resolve(image)
+      else reject(new Error('Canvas could not be encoded'))
+    }, 'image/png')
+  })
 }
 
 function trimTransparentCanvas(source: HTMLCanvasElement) {
