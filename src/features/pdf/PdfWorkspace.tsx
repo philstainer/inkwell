@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import * as pdfjs from 'pdfjs-dist'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
@@ -192,6 +192,43 @@ type PageProps = {
   onDropSignature: (id: string, pageAspectRatio: number, x: number, y: number) => void
 }
 
+type FillTextProps = {
+  value: string
+  font: Parameters<typeof fillFontFamily>[0]
+  initialHeight: number
+}
+
+function FillText({ value, font, initialHeight }: FillTextProps) {
+  const textRef = useRef<HTMLSpanElement>(null)
+  const contentRef = useRef<HTMLSpanElement>(null)
+
+  useLayoutEffect(() => {
+    const node = textRef.current
+    const content = contentRef.current
+    if (!node || !content) return
+    const scaleText = () => {
+      const heightFontSize = node.clientHeight * .7
+      node.style.fontSize = `${heightFontSize}px`
+      const contentWidth = content.getBoundingClientRect().width
+      if (contentWidth > node.clientWidth) {
+        node.style.fontSize = `${heightFontSize * node.clientWidth / contentWidth * .94}px`
+      }
+    }
+    scaleText()
+    const observer = new ResizeObserver(scaleText)
+    observer.observe(node)
+    const fonts = globalThis.document.fonts
+    void fonts.ready.then(() => { if (node.isConnected) scaleText() })
+    fonts.addEventListener('loadingdone', scaleText)
+    return () => {
+      observer.disconnect()
+      fonts.removeEventListener('loadingdone', scaleText)
+    }
+  }, [font, initialHeight, value])
+
+  return <span ref={textRef} className="fill-text" style={{ fontFamily: fillFontFamily(font), fontSize: `${initialHeight * .7}px` }}><span ref={contentRef}>{value}</span></span>
+}
+
 function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatures, placements, allPlacements, selectedId, onSelect, onChange, onDropSignature }: PageProps) {
   const canvasHost = useRef<HTMLDivElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
@@ -302,7 +339,7 @@ function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatu
             ? <img src={urls.get(item.signatureId)} alt="Placed signature" draggable={false} onContextMenu={(event) => event.preventDefault()} />
             : item.kind === 'checkmark'
               ? <span className="fill-checkmark"><Check aria-label="Checkmark" /></span>
-              : <span className="fill-text" style={{ fontFamily: fillFontFamily(item.font), fontSize: `${item.height * size.height * .7}px` }}>{item.value}</span>}
+              : <FillText value={item.value} font={item.font} initialHeight={item.height * size.height} />}
           {selectedId === item.id && <div className="placement-actions"><button onClick={(e) => { e.stopPropagation(); duplicate(item) }} aria-label="Duplicate"><Copy size={13} /></button><button onClick={(e) => { e.stopPropagation(); remove(item.id) }} aria-label="Delete"><Trash2 size={13} /></button></div>}
         </Rnd>)}
       </div>
