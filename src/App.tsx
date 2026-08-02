@@ -31,6 +31,17 @@ function App() {
   useEffect(() => { void Promise.all([getSignatures(), getDraft()]).then(([saved, draft]) => { setSignatures(saved.sort((a, b) => b.createdAt - a.createdAt)); if (draft) { setPdf(draft.pdf); setFileName(draft.fileName); setPlacements(draft.placements); setRestored(true) } }) }, [])
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('theme', dark ? 'dark' : 'light') }, [dark])
   useEffect(() => { if (!pdf) return; const timer = window.setTimeout(() => void saveDraft({ id: 'current', fileName, pdf, placements, lastEditedAt: Date.now() }), 500); return () => clearTimeout(timer) }, [pdf, fileName, placements])
+  useEffect(() => {
+    const outsidePdf = (target: EventTarget | null) => !(target instanceof Element && target.closest('.workspace'))
+    const stopUiPinch = (event: TouchEvent) => { if (event.touches.length > 1 && outsidePdf(event.target)) event.preventDefault() }
+    const stopUiGesture = (event: Event) => { if (outsidePdf(event.target)) event.preventDefault() }
+    document.addEventListener('touchmove', stopUiPinch, { passive: false })
+    document.addEventListener('gesturestart', stopUiGesture, { passive: false })
+    return () => {
+      document.removeEventListener('touchmove', stopUiPinch)
+      document.removeEventListener('gesturestart', stopUiGesture)
+    }
+  }, [])
 
   const changePlacements = useCallback((next: Placement[]) => { setPlacements((current) => { setHistory((items) => [...items.slice(-39), current]); return next }); setFuture([]) }, [])
   const openFile = (file?: File) => { if (!file) return; setPdf(file); setFileName(file.name); setPlacements([]); setHistory([]); setFuture([]); setRestored(false) }
@@ -68,12 +79,13 @@ function App() {
   const download = async () => { if (!pdf) return; const result = await exportPdf(pdf, placements, signatures); const url = URL.createObjectURL(result); const anchor = document.createElement('a'); anchor.href = url; anchor.download = fileName.replace(/\.pdf$/i, '') + '-signed.pdf'; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000) }
   const undo = () => { const previous = history.at(-1); if (!previous) return; setFuture((items) => [placements, ...items]); setPlacements(previous); setHistory((items) => items.slice(0, -1)) }
   const redo = () => { const next = future[0]; if (!next) return; setHistory((items) => [...items, placements]); setPlacements(next); setFuture((items) => items.slice(1)) }
+  const pinchZoom = useCallback((nextZoom: number) => { setFitWidth(false); setZoom(nextZoom) }, [])
 
   return <div className="app-shell">
     <header className="topbar"><div className="brand"><span className="brand-mark"><FileText size={18} /><i /></span><span>Inkwell</span></div><div className="document-title">{fileName || 'Untitled document'}{pdf && <span className="saved"><Check size={12} /> Saved locally</span>}</div><div className="toolbar-actions"><button className="icon-button theme-button" onClick={() => setDark(!dark)} aria-label="Toggle theme">{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="button ghost" onClick={() => picker.current?.click()}><FolderOpen size={16} /> Open PDF</button><button className="button primary" disabled={!pdf || placements.length === 0} onClick={download}><Download size={16} /> Save PDF</button></div></header>
     <div className="privacy-banner"><ShieldCheck size={14} /><span>Your documents never leave your device. Everything is processed locally in your browser.</span></div>
     <div className="editor-toolbar"><div className="tool-group"><button className="icon-button" onClick={undo} disabled={!history.length} aria-label="Undo"><Undo2 size={16} /></button><button className="icon-button" onClick={redo} disabled={!future.length} aria-label="Redo"><Redo2 size={16} /></button></div><div className="tool-group zoom-group"><button className="icon-button" onClick={() => { setFitWidth(false); setZoom((v) => Math.max(.35, v - .1)) }} aria-label="Zoom out"><Minus size={15} /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" onClick={() => { setFitWidth(false); setZoom((v) => Math.min(2, v + .1)) }} aria-label="Zoom in"><Plus size={15} /></button></div><button className="fit-button" onClick={() => { setFitWidth(true); setZoom(fitWidthZoom()) }}>Fit width <ChevronDown size={13} /></button></div>
-    <div className="editor-body"><SignatureLibrary signatures={signatures} onAdd={() => setDialog(true)} onDelete={deleteSignature} onPlace={placeSignature} onTouchDrop={dropSignatureFromTouch} /><PdfWorkspace pdf={pdf} zoom={zoom} fitWidth={fitWidth} signatures={signatures} placements={placements} selectedId={selectedId} onSelect={setSelectedId} onChange={changePlacements} onOpen={() => picker.current?.click()} onFileDrop={openFile} /></div>
+    <div className="editor-body"><SignatureLibrary signatures={signatures} onAdd={() => setDialog(true)} onDelete={deleteSignature} onPlace={placeSignature} onTouchDrop={dropSignatureFromTouch} /><PdfWorkspace pdf={pdf} zoom={zoom} fitWidth={fitWidth} onZoomChange={pinchZoom} signatures={signatures} placements={placements} selectedId={selectedId} onSelect={setSelectedId} onChange={changePlacements} onOpen={() => picker.current?.click()} onFileDrop={openFile} /></div>
     {restored && <div className="toast"><Check size={15} /> Restored your last draft</div>}<input ref={picker} className="visually-hidden" type="file" accept="application/pdf" onChange={(e) => openFile(e.target.files?.[0])} /><SignatureDialog open={dialog} onOpenChange={setDialog} onSave={addSignature} />
   </div>
 }

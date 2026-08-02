@@ -12,6 +12,7 @@ type Props = {
   pdf: Blob | null
   zoom: number
   fitWidth: boolean
+  onZoomChange: (zoom: number) => void
   signatures: Signature[]
   placements: Placement[]
   selectedId: string | null
@@ -22,11 +23,15 @@ type Props = {
 }
 
 export function PdfWorkspace(props: Props) {
-  const { pdf, zoom, fitWidth, signatures, placements, selectedId, onSelect, onChange, onOpen, onFileDrop } = props
+  const { pdf, zoom, fitWidth, onZoomChange, signatures, placements, selectedId, onSelect, onChange, onOpen, onFileDrop } = props
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [workspaceWidth, setWorkspaceWidth] = useState(0)
   const workspaceRef = useRef<HTMLElement>(null)
+  const zoomRef = useRef(zoom)
+  const onZoomChangeRef = useRef(onZoomChange)
+  zoomRef.current = zoom
+  onZoomChangeRef.current = onZoomChange
 
   useEffect(() => {
     setDocument(null)
@@ -51,6 +56,44 @@ export function PdfWorkspace(props: Props) {
     observer.observe(node)
     return () => observer.disconnect()
   }, [document, pdf])
+
+  useEffect(() => {
+    const node = workspaceRef.current
+    if (!node || !document) return
+    let pinchStart: { distance: number; zoom: number } | null = null
+    let animationFrame = 0
+    let pendingZoom = zoomRef.current
+    const distance = (touches: TouchList) => Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY)
+    const start = (event: TouchEvent) => {
+      if (event.touches.length !== 2) return
+      pinchStart = { distance: distance(event.touches), zoom: zoomRef.current }
+      node.classList.add('pinching')
+    }
+    const move = (event: TouchEvent) => {
+      if (event.touches.length !== 2 || !pinchStart) return
+      event.preventDefault()
+      pendingZoom = Math.max(.25, Math.min(1.6, pinchStart.zoom * distance(event.touches) / pinchStart.distance))
+      if (animationFrame) return
+      animationFrame = requestAnimationFrame(() => { animationFrame = 0; onZoomChangeRef.current(pendingZoom) })
+    }
+    const end = (event: TouchEvent) => {
+      if (event.touches.length >= 2) return
+      pinchStart = null
+      node.classList.remove('pinching')
+    }
+    node.addEventListener('touchstart', start, { passive: true })
+    node.addEventListener('touchmove', move, { passive: false })
+    node.addEventListener('touchend', end, { passive: true })
+    node.addEventListener('touchcancel', end, { passive: true })
+    return () => {
+      cancelAnimationFrame(animationFrame)
+      node.classList.remove('pinching')
+      node.removeEventListener('touchstart', start)
+      node.removeEventListener('touchmove', move)
+      node.removeEventListener('touchend', end)
+      node.removeEventListener('touchcancel', end)
+    }
+  }, [document])
 
   if (pdf && !document) return (
     <main ref={workspaceRef} className="workspace loading-workspace">
@@ -163,12 +206,13 @@ function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatu
       const nextCanvas = globalThis.document.createElement('canvas')
       const context = nextCanvas.getContext('2d')
       if (!context) return
-      nextCanvas.width = Math.floor(viewport.width * devicePixelRatio)
-      nextCanvas.height = Math.floor(viewport.height * devicePixelRatio)
+      const renderPixelRatio = Math.min(devicePixelRatio, 2)
+      nextCanvas.width = Math.floor(viewport.width * renderPixelRatio)
+      nextCanvas.height = Math.floor(viewport.height * renderPixelRatio)
       nextCanvas.style.width = `${viewport.width}px`
       nextCanvas.style.height = `${viewport.height}px`
       host.replaceChildren(nextCanvas)
-      ownedTask = page.render({ canvas: nextCanvas, canvasContext: context, viewport, transform: [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0] })
+      ownedTask = page.render({ canvas: nextCanvas, canvasContext: context, viewport, transform: [renderPixelRatio, 0, 0, renderPixelRatio, 0, 0] })
       renderTaskRef.current = ownedTask
       try { await ownedTask.promise } catch { /* Superseded renders are deliberately cancelled. */ }
       if (renderTaskRef.current === ownedTask) renderTaskRef.current = null
