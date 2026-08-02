@@ -8,11 +8,20 @@ import { getDraft, getSignatures, removeSignature, saveDraft, saveSignature } fr
 import { isSignaturePlacement, type FillPlacement, type Placement, type Signature } from './types'
 import { getImageAspectRatio, signatureHeightRatio, signatureWidthRatioForZoom } from './features/signatures/imageDimensions'
 import { FillTools } from './features/fill/FillTools'
+import { FontPicker } from './features/fill/FontPicker'
+import type { FillFont } from './features/fill/fonts'
 import './App.css'
 
 const fitWidthZoom = () => window.innerWidth <= 700
   ? Math.max(.35, Math.min(.82, (window.innerWidth - 32) / (612 * 1.25)))
   : .82
+
+type PlacementTarget = {
+  pageNumber: number
+  pageAspectRatio: number
+  centerX: number
+  centerY: number
+}
 
 function App() {
   const picker = useRef<HTMLInputElement>(null)
@@ -30,6 +39,7 @@ function App() {
   const [restored, setRestored] = useState(false)
   const [fillDialog, setFillDialog] = useState<'text' | 'initials' | null>(null)
   const [fillValue, setFillValue] = useState('')
+  const [fillFont, setFillFont] = useState<FillFont>('sans')
 
   useEffect(() => { void Promise.all([getSignatures(), getDraft()]).then(([saved, draft]) => { setSignatures(saved.sort((a, b) => b.createdAt - a.createdAt)); if (draft) { setPdf(draft.pdf); setFileName(draft.fileName); setPlacements(draft.placements); setRestored(true) } }) }, [])
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('theme', dark ? 'dark' : 'light') }, [dark])
@@ -50,19 +60,48 @@ function App() {
   const openFile = (file?: File) => { if (!file) return; setPdf(file); setFileName(file.name); setPlacements([]); setHistory([]); setFuture([]); setRestored(false) }
   const addSignature = async (signature: Signature) => { await saveSignature(signature); setSignatures((items) => [signature, ...items]) }
   const deleteSignature = async (id: string) => { await removeSignature(id); setSignatures((items) => items.filter((item) => item.id !== id)); changePlacements(placements.filter((item) => !isSignaturePlacement(item) || item.signatureId !== id)) }
-  const placeSignature = async (signatureId: string, target?: { pageNumber: number; pageAspectRatio: number; centerX: number; centerY: number }) => {
+  const getCurrentViewTarget = (): PlacementTarget | undefined => {
+    const workspace = document.querySelector<HTMLElement>('.workspace')
+    if (!workspace) return
+    const viewport = workspace.getBoundingClientRect()
+    let best: { target: PlacementTarget; visibleArea: number } | undefined
+
+    for (const page of workspace.querySelectorAll<HTMLElement>('.pdf-page')) {
+      const rect = page.getBoundingClientRect()
+      const left = Math.max(rect.left, viewport.left)
+      const right = Math.min(rect.right, viewport.right)
+      const top = Math.max(rect.top, viewport.top)
+      const bottom = Math.min(rect.bottom, viewport.bottom)
+      const visibleArea = Math.max(0, right - left) * Math.max(0, bottom - top)
+      if (visibleArea === 0 || (best && visibleArea <= best.visibleArea)) continue
+
+      best = {
+        visibleArea,
+        target: {
+          pageNumber: Number(page.dataset.pageNumber),
+          pageAspectRatio: rect.width / rect.height,
+          centerX: ((left + right) / 2 - rect.left) / rect.width,
+          centerY: ((top + bottom) / 2 - rect.top) / rect.height,
+        },
+      }
+    }
+
+    return best?.target
+  }
+  const placeSignature = async (signatureId: string, target?: PlacementTarget) => {
     if (!pdf) return
     const signature = signatures.find((item) => item.id === signatureId)
     if (!signature) return
+    const placementTarget = target ?? getCurrentViewTarget()
     const width = signatureWidthRatioForZoom(zoom)
     const imageAspectRatio = await getImageAspectRatio(signature.image)
-    const pageAspectRatio = target?.pageAspectRatio ?? 612 / 792
+    const pageAspectRatio = placementTarget?.pageAspectRatio ?? 612 / 792
     const height = signatureHeightRatio(width, pageAspectRatio, imageAspectRatio)
     const placementId = crypto.randomUUID()
     changePlacements([...placements, {
-      id: placementId, kind: 'signature', signatureId, pageNumber: target?.pageNumber ?? 1,
-      x: Math.max(0, Math.min(target ? target.centerX - width / 2 : .36, 1 - width)),
-      y: Math.max(0, Math.min(target ? target.centerY - height / 2 : .42, 1 - height)), width, height,
+      id: placementId, kind: 'signature', signatureId, pageNumber: placementTarget?.pageNumber ?? 1,
+      x: Math.max(0, Math.min((placementTarget?.centerX ?? .5) - width / 2, 1 - width)),
+      y: Math.max(0, Math.min((placementTarget?.centerY ?? .5) - height / 2, 1 - height)), width, height,
     }])
     setSelectedId(placementId)
   }
@@ -85,8 +124,13 @@ function App() {
       : kind === 'initials' ? { width: .14, height: .042 }
       : kind === 'date' ? { width: .22, height: .04 }
       : { width: .28, height: .045 }
-    const offset = placements.filter((item) => !isSignaturePlacement(item)).length % 5
-    const placement: FillPlacement = { id: crypto.randomUUID(), kind, value, pageNumber: 1, x: .32 + offset * .025, y: .34 + offset * .065, ...dimensions }
+    const target = getCurrentViewTarget()
+    const placement: FillPlacement = {
+      id: crypto.randomUUID(), kind, value, font: fillFont, pageNumber: target?.pageNumber ?? 1,
+      x: Math.max(0, Math.min((target?.centerX ?? .5) - dimensions.width / 2, 1 - dimensions.width)),
+      y: Math.max(0, Math.min((target?.centerY ?? .5) - dimensions.height / 2, 1 - dimensions.height)),
+      ...dimensions,
+    }
     changePlacements([...placements, placement])
     setSelectedId(placement.id)
   }
@@ -107,11 +151,18 @@ function App() {
   const undo = () => { const previous = history.at(-1); if (!previous) return; setFuture((items) => [placements, ...items]); setPlacements(previous); setHistory((items) => items.slice(0, -1)) }
   const redo = () => { const next = future[0]; if (!next) return; setHistory((items) => [...items, placements]); setPlacements(next); setFuture((items) => items.slice(1)) }
   const pinchZoom = useCallback((nextZoom: number) => { setFitWidth(false); setZoom(nextZoom) }, [])
+  const selectedPlacement = placements.find((item) => item.id === selectedId)
+  const selectedFill = selectedPlacement && !isSignaturePlacement(selectedPlacement) && selectedPlacement.kind !== 'checkmark' ? selectedPlacement : null
+  const activeFillFont = selectedFill?.font ?? fillFont
+  const changeFillFont = (font: FillFont) => {
+    setFillFont(font)
+    if (selectedFill) changePlacements(placements.map((item) => item.id === selectedFill.id && !isSignaturePlacement(item) ? { ...item, font } : item))
+  }
 
   return <div className="app-shell">
     <header className="topbar"><div className="brand"><span className="brand-mark"><FileText size={18} /><i /></span><span>Inkwell</span></div><div className="document-title">{fileName || 'Untitled document'}{pdf && <span className="saved"><Check size={12} /> Saved locally</span>}</div><div className="toolbar-actions"><button className="icon-button theme-button" onClick={() => setDark(!dark)} aria-label="Toggle theme">{dark ? <Sun size={17} /> : <Moon size={17} />}</button><button className="button ghost" onClick={() => picker.current?.click()}><FolderOpen size={16} /> Open PDF</button><button className="button primary" disabled={!pdf || placements.length === 0} onClick={download}><Download size={16} /> Save PDF</button></div></header>
     <div className="privacy-banner"><ShieldCheck size={14} /><span>Your documents never leave your device. Everything is processed locally in your browser.</span></div>
-    <div className="editor-toolbar"><div className="mobile-fill-tools"><FillTools compact disabled={!pdf} onAdd={chooseFillTool} /><button className="mobile-new-signature" onClick={() => setDialog(true)} aria-label="New signature" title="New signature"><span className="mobile-new-signature-glyph"><PenLine className="mobile-new-signature-pen" size={16} /><Plus className="mobile-new-signature-plus" size={8} /></span></button></div><div className="tool-group"><button className="icon-button" onClick={undo} disabled={!history.length} aria-label="Undo"><Undo2 size={16} /></button><button className="icon-button" onClick={redo} disabled={!future.length} aria-label="Redo"><Redo2 size={16} /></button></div><div className="tool-group zoom-group"><button className="icon-button" onClick={() => { setFitWidth(false); setZoom((v) => Math.max(.35, v - .1)) }} aria-label="Zoom out"><Minus size={15} /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" onClick={() => { setFitWidth(false); setZoom((v) => Math.min(2, v + .1)) }} aria-label="Zoom in"><Plus size={15} /></button></div><button className="fit-button" onClick={() => { setFitWidth(true); setZoom(fitWidthZoom()) }}>Fit width <ChevronDown size={13} /></button></div>
+    <div className="editor-toolbar"><div className="mobile-fill-tools"><FillTools compact disabled={!pdf} onAdd={chooseFillTool} /><button className="mobile-new-signature" onClick={() => setDialog(true)} aria-label="New signature" title="New signature"><span className="mobile-new-signature-glyph"><PenLine className="mobile-new-signature-pen" size={16} /><Plus className="mobile-new-signature-plus" size={8} /></span></button></div><FontPicker compact value={activeFillFont} onChange={changeFillFont} /><div className="tool-group"><button className="icon-button" onClick={undo} disabled={!history.length} aria-label="Undo"><Undo2 size={16} /></button><button className="icon-button" onClick={redo} disabled={!future.length} aria-label="Redo"><Redo2 size={16} /></button></div><div className="tool-group zoom-group"><button className="icon-button" onClick={() => { setFitWidth(false); setZoom((v) => Math.max(.35, v - .1)) }} aria-label="Zoom out"><Minus size={15} /></button><span>{Math.round(zoom * 100)}%</span><button className="icon-button" onClick={() => { setFitWidth(false); setZoom((v) => Math.min(2, v + .1)) }} aria-label="Zoom in"><Plus size={15} /></button></div><button className="fit-button" onClick={() => { setFitWidth(true); setZoom(fitWidthZoom()) }}>Fit width <ChevronDown size={13} /></button></div>
     <div className="editor-body"><SignatureLibrary signatures={signatures} onAdd={() => setDialog(true)} onDelete={deleteSignature} onPlace={placeSignature} onTouchDrop={dropSignatureFromTouch} pdfOpen={Boolean(pdf)} onAddFill={chooseFillTool} /><PdfWorkspace pdf={pdf} zoom={zoom} fitWidth={fitWidth} onZoomChange={pinchZoom} signatures={signatures} placements={placements} selectedId={selectedId} onSelect={setSelectedId} onChange={changePlacements} onOpen={() => picker.current?.click()} onFileDrop={openFile} /></div>
     {restored && <div className="toast"><Check size={15} /> Restored your last draft</div>}<input ref={picker} className="visually-hidden" type="file" accept="application/pdf" onChange={(e) => openFile(e.target.files?.[0])} /><SignatureDialog open={dialog} onOpenChange={setDialog} onSave={addSignature} />
     {fillDialog && <div className="fill-dialog-backdrop" onMouseDown={() => setFillDialog(null)}><form className="fill-dialog" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); confirmFill() }}>
@@ -119,6 +170,7 @@ function App() {
       <p>You can move and resize it after placing it.</p>
       <label className="field-label" htmlFor="fill-value">{fillDialog === 'initials' ? 'Your initials' : 'Text'}</label>
       <input id="fill-value" className="text-input" autoFocus maxLength={fillDialog === 'initials' ? 12 : 120} value={fillValue} onChange={(event) => setFillValue(event.target.value)} placeholder={fillDialog === 'initials' ? 'e.g. PS' : 'Enter text'} />
+      <span className="field-label font-field-label">Font</span><FontPicker value={fillFont} onChange={setFillFont} />
       <div className="fill-dialog-actions"><button type="button" className="button ghost" onClick={() => setFillDialog(null)}>Cancel</button><button type="submit" className="button primary" disabled={!fillValue.trim()}>Add to PDF</button></div>
     </form></div>}
   </div>

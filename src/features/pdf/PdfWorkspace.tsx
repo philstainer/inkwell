@@ -5,6 +5,7 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import { Check, Copy, FileUp, Trash2 } from 'lucide-react'
 import { isSignaturePlacement, type Placement, type Signature } from '../../types'
 import { getImageAspectRatio, signatureHeightRatio, signatureWidthRatioForZoom } from '../signatures/imageDimensions'
+import { fillFontFamily } from '../fill/fonts'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
 
@@ -301,7 +302,7 @@ function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatu
             ? <img src={urls.get(item.signatureId)} alt="Placed signature" draggable={false} onContextMenu={(event) => event.preventDefault()} />
             : item.kind === 'checkmark'
               ? <span className="fill-checkmark"><Check aria-label="Checkmark" /></span>
-              : <span className="fill-text">{item.value}</span>}
+              : <span className="fill-text" style={{ fontFamily: fillFontFamily(item.font), fontSize: `${item.height * size.height * .7}px` }}>{item.value}</span>}
           {selectedId === item.id && <div className="placement-actions"><button onClick={(e) => { e.stopPropagation(); duplicate(item) }} aria-label="Duplicate"><Copy size={13} /></button><button onClick={(e) => { e.stopPropagation(); remove(item.id) }} aria-label="Delete"><Trash2 size={13} /></button></div>}
         </Rnd>)}
       </div>

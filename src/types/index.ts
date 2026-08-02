@@ -23,6 +23,8 @@ export type SignaturePlacement = BasePlacement & {
 export type FillPlacement = BasePlacement & {
   kind: 'text' | 'initials' | 'date' | 'checkmark'
   value: string
+  /** Missing on fill fields created before font choices were introduced. */
+  font?: FillFont
 }
 
 export type Placement = SignaturePlacement | FillPlacement
@@ -37,3 +39,4 @@ export type Draft = {
   placements: Placement[]
   lastEditedAt: number
 }
+import type { FillFont } from '../features/fill/fonts'
