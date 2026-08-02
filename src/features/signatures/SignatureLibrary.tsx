@@ -1,6 +1,7 @@
 import { MoreHorizontal, PenLine, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { Signature } from '../../types'
+import { FillTools } from '../fill/FillTools'
 
 type Props = {
   signatures: Signature[]
@@ -8,12 +9,15 @@ type Props = {
   onDelete: (id: string) => void
   onPlace: (id: string) => void
   onTouchDrop: (id: string, clientX: number, clientY: number) => boolean
+  pdfOpen: boolean
+  onAddFill: (kind: 'text' | 'initials' | 'date' | 'checkmark') => void
 }
 
-export function SignatureLibrary({ signatures, onAdd, onDelete, onPlace, onTouchDrop }: Props) {
+export function SignatureLibrary({ signatures, onAdd, onDelete, onPlace, onTouchDrop, pdfOpen, onAddFill }: Props) {
   const [touchDrag, setTouchDrag] = useState<{ url: string; x: number; y: number } | null>(null)
   return (
     <aside className="sidebar">
+      <FillTools disabled={!pdfOpen} onAdd={onAddFill} />
       <div className="sidebar-header">
         <span>Signatures</span>
         <span className="count">{signatures.length}</span>
