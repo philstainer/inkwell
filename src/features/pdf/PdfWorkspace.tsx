@@ -207,6 +207,7 @@ function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatu
           enableResizing={selectedId === item.id ? { bottomRight: true } : false}
           resizeHandleComponent={selectedId === item.id ? { bottomRight: <span className="signature-resize-handle" aria-hidden="true" /> } : undefined}
           role="button" tabIndex={0} aria-label="Signature placement. Drag to move or use the corner handle to resize."
+          onContextMenu={(event: React.MouseEvent) => event.preventDefault()}
           onPointerDown={(event: React.PointerEvent) => { event.stopPropagation(); onSelect(item.id) }}
           onClick={(event: React.MouseEvent) => { event.stopPropagation(); onSelect(item.id) }}
           onKeyDown={(event: React.KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(item.id) } }}
@@ -214,7 +215,7 @@ function PdfPage({ document, pageNumber, zoom, fitWidth, availableWidth, signatu
           onDragStart={() => onSelect(item.id)} onResizeStart={() => onSelect(item.id)}
           onDragStop={(_, data) => update(item.id, { x: data.x / size.width, y: data.y / size.height })}
           onResizeStop={(_, __, ref, ___, position) => update(item.id, { x: position.x / size.width, y: position.y / size.height, width: ref.offsetWidth / size.width, height: ref.offsetHeight / size.height })}>
-          <img src={urls.get(item.signatureId)} alt="Placed signature" draggable={false} />
+          <img src={urls.get(item.signatureId)} alt="Placed signature" draggable={false} onContextMenu={(event) => event.preventDefault()} />
           {selectedId === item.id && <div className="placement-actions"><button onClick={(e) => { e.stopPropagation(); duplicate(item) }} aria-label="Duplicate"><Copy size={13} /></button><button onClick={(e) => { e.stopPropagation(); remove(item.id) }} aria-label="Delete"><Trash2 size={13} /></button></div>}
         </Rnd>)}
       </div>

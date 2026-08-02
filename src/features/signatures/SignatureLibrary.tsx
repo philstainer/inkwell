@@ -54,12 +54,13 @@ function SignatureCard({ signature, onDelete, onPlace, onTouchDrag, onTouchDrop 
 
   return (
     <div className="signature-card" draggable onDragStart={(event) => event.dataTransfer.setData('application/signature-id', signature.id)}
+      onContextMenu={(event) => event.preventDefault()}
       onPointerDown={(event) => { if (event.pointerType === 'mouse') return; pointerStart.current = { x: event.clientX, y: event.clientY }; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId) }}
       onPointerMove={(event) => { if (!pointerStart.current) return; const distance = Math.hypot(event.clientX - pointerStart.current.x, event.clientY - pointerStart.current.y); if (distance < 8 && !dragged.current) return; dragged.current = true; onTouchDrag(url, event.clientX, event.clientY) }}
       onPointerUp={(event) => { if (!pointerStart.current) return; if (dragged.current) onTouchDrop(event.clientX, event.clientY); pointerStart.current = null }}
       onPointerCancel={() => { if (dragged.current) onTouchDrop(-1, -1); pointerStart.current = null; dragged.current = false }}>
       <button className="signature-preview" onClick={() => { if (dragged.current) { dragged.current = false; return } onPlace(signature.id) }} aria-label={`Place ${signature.name}`}>
-        {url && <img src={url} alt="" />}
+        {url && <img src={url} alt="" draggable={false} onContextMenu={(event) => event.preventDefault()} />}
       </button>
       <div className="signature-meta"><strong>{signature.name}</strong><span>Tap or drag to place</span></div>
       <button className="more-button" aria-label={`Options for ${signature.name}`} onClick={() => setMenu(!menu)}><MoreHorizontal size={17} /></button>
