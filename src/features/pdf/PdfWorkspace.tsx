@@ -62,24 +62,56 @@ export function PdfWorkspace(props: Props) {
     if (!node || !document) return
     let pinchStart: { distance: number; zoom: number } | null = null
     let animationFrame = 0
+    let alignmentFrame = 0
+    let settleTimer = 0
     let pendingZoom = zoomRef.current
+    let anchor: { page: HTMLElement; x: number; y: number; clientX: number; clientY: number } | null = null
+    const anchorObserver = new ResizeObserver(() => alignAnchor())
     const distance = (touches: TouchList) => Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY)
+    const midpoint = (touches: TouchList) => ({ clientX: (touches[0].clientX + touches[1].clientX) / 2, clientY: (touches[0].clientY + touches[1].clientY) / 2 })
+    function alignAnchor() {
+      if (!anchor || !anchor.page.isConnected) return
+      const rect = anchor.page.getBoundingClientRect()
+      node!.scrollLeft += rect.left + rect.width * anchor.x - anchor.clientX
+      node!.scrollTop += rect.top + rect.height * anchor.y - anchor.clientY
+    }
     const start = (event: TouchEvent) => {
       if (event.touches.length !== 2) return
-      pinchStart = { distance: distance(event.touches), zoom: zoomRef.current }
+      const startDistance = distance(event.touches)
+      if (startDistance === 0) return
+      pinchStart = { distance: startDistance, zoom: zoomRef.current }
+      const center = midpoint(event.touches)
+      const page = globalThis.document.elementFromPoint(center.clientX, center.clientY)?.closest<HTMLElement>('.pdf-page')
+      anchorObserver.disconnect()
+      clearTimeout(settleTimer)
+      if (page) {
+        const rect = page.getBoundingClientRect()
+        anchor = { page, x: (center.clientX - rect.left) / rect.width, y: (center.clientY - rect.top) / rect.height, ...center }
+        anchorObserver.observe(page)
+      } else {
+        anchor = null
+      }
       node.classList.add('pinching')
     }
     const move = (event: TouchEvent) => {
       if (event.touches.length !== 2 || !pinchStart) return
       event.preventDefault()
+      const center = midpoint(event.touches)
+      if (anchor) { anchor.clientX = center.clientX; anchor.clientY = center.clientY; alignAnchor() }
       pendingZoom = Math.max(.25, Math.min(1.6, pinchStart.zoom * distance(event.touches) / pinchStart.distance))
       if (animationFrame) return
-      animationFrame = requestAnimationFrame(() => { animationFrame = 0; onZoomChangeRef.current(pendingZoom) })
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = 0
+        onZoomChangeRef.current(pendingZoom)
+        cancelAnimationFrame(alignmentFrame)
+        alignmentFrame = requestAnimationFrame(alignAnchor)
+      })
     }
     const end = (event: TouchEvent) => {
       if (event.touches.length >= 2) return
       pinchStart = null
       node.classList.remove('pinching')
+      settleTimer = window.setTimeout(() => { alignAnchor(); anchorObserver.disconnect(); anchor = null }, 400)
     }
     node.addEventListener('touchstart', start, { passive: true })
     node.addEventListener('touchmove', move, { passive: false })
@@ -87,6 +119,9 @@ export function PdfWorkspace(props: Props) {
     node.addEventListener('touchcancel', end, { passive: true })
     return () => {
       cancelAnimationFrame(animationFrame)
+      cancelAnimationFrame(alignmentFrame)
+      clearTimeout(settleTimer)
+      anchorObserver.disconnect()
       node.classList.remove('pinching')
       node.removeEventListener('touchstart', start)
       node.removeEventListener('touchmove', move)
